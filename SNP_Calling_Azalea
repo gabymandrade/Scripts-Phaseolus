@@ -1,0 +1,124 @@
+#SNP Calling
+The samples demultiplexing was performed with GBSx and the SNP Calling was done following the GATK Best Practices algoritm (https://software.broadinstitute.org/gatk/best-practices/bp_3step.php?case=GermShortWGS&p=1)
+Check the directory darjeeling_zoology_ubc/bin/bin_SNP_Calling
+
+**Note:** working directory must be ```SNP_calling/bin``` 
+
+##1. Fastq demultiplexing with GBS x
+The fastq files were demultiplexed with GBSX_v1.3 (https://github.com/GenomicsCoreLeuven/GBSX).
+Script to demultiplex all libraries:
+``` 1-Demultiplexing.sh ```
+
+Example of command line: 
+``` 
+java -jar GBSX-master/releases/latest/GBSX_v1.3.jar --Demultiplexer -f1 ../data/C8B0DANXX_1/C8B0DANXX_1_fastq.gz -i ../meta/C8B0DANXX_1_barcodes.txt -ea ../meta/BfaI.txt -gzip true -t 10 -o ../data/C8B0DANXX_1/fastq
+```
+ - f1: fastq file 
+ - i: file containing the barcodes. It must be integrated by three columns whitout header:
+A) Sample name
+B) Barcode
+C) Enzyme used to digest the samples
+ - ea: file to the restriction enzymes info. This flag is used when the enzyme is not in the defoult list
+ - gzip: to indicate that the fastq file is compressed
+ - o: path for the output file
+
+##2. Alignment
+The  reads aligment was performed using an edited version for the script **align_process.bash**
+availaible in the Greg Owens github: https://github.com/owensgl/argentina_helianthus/blob/master/align_process.bash
+
+This step requieres the installation of:
+- Picard (https://sourceforge.net/projects/picard/)
+- miniconda
+ ```wget -c http://repo.continuum.io/miniconda/Miniconda-latest-Linux-x86_64.sh
+   ```
+- SamTools
+- nextgenmap-0.5.3-0 (https://github.com/Cibiv/NextGen
+- The **trimmomatic** directory has  a subdirectory called **adapters** which must contain the sequence of the adapters used to do the libraries. The file with the adapter sequences  must be in fasta format, example:
+```
+>seq1
+CWGAGATCGGAAGAGCGGTTCAGCAGGAATGCCGAG
+>seq2
+ACACTCTTTCCCTACACGACGCTCTTCCGATCTAGGC
+>seq3
+ACACTCTTTCCCTACACGACGCTCTTCCGATCTGATT
+```
+
+The next command line insert the header in each sequence:
+```awk '{print ">seq" NR} 1' file```
+- The reference genome is also required as fa file
+
+Script to align the demultiplexed fastq files, which is contained in the working directory:
+``` 2-Align.sh ```
+
+**Note:** Important to modify the paths in the script file.
+
+##3. Variant Discovery
+
+#####WARNINGS:
+Before performing the raw SNP Calling, two previous steps must be done:
+1) To do a dictionary with picard.jar
+```
+java -jar /LUSTRE/Genetica/aguerra/SNP_calling/bin/picard/build/libs/picard.jar CreateSequenceDictionary R= /LUSTRE/Genetica/aguerra/SNP_calling/Pvulgarisv2.1/assembly/Pvulgaris_442_v2.0.fa O= /LUSTRE/Genetica/aguerra/SNP_calling/Pvulgarisv2.1/assembly/Pvulgaris_442_v2.0.dict
+```
+2) To do an index with samtools
+```
+./samtools-1.6/samtools faidx /LUSTRE/Genetica/aguerra/SNP_calling/Pvulgarisv2.1/assembly/Pvulgaris_442_v2.0.fa
+```
+
+These lines are contained in the scrip ```3-0-Pre_variant_discovery.sh```
+
+#####Variant discovery
+The variant discovery was run with the Haplotype Caller tool of GATK. I used a modified version of the script https://github.com/owensgl/argentina_helianthus/blob/master/make_gcvf_gatk.bash available at Greg Owens github.
+
+```
+for library in C8B0DANXX_1 C8B0DANXX_2 C9DW2ANXX_6 C9DW2ANXX_7; do 
+
+javarules="-Djava.io.tmpdir=~/SNP_calling/speedy/tmp"
+ncores="10"
+while read prefix
+do
+ if [ ! -f ~/SNP_calling/data/gvcf/$prefix.gvcf.vcf.idx ]
+then
+./gatk-4.0.1.0/gatk --java-options "-Xmx50g" HaplotypeCaller  \
+	-R /LUSTRE/Genetica/aguerra/SNP_calling/Pvulgarisv2.1/assembly/Pvulgaris_442_v2.0.fa \
+	-I ~/SNP_calling/data/$library/bam/$prefix.sort.bam \
+	-O ~/SNP_calling/data/gvcf/$prefix.gvcf.vcf \
+	--native-pair-hmm-threads $ncores\
+	-ERC GVCF \
+	--max-alternate-alleles 3 \
+	--verbosity INFO ; 
+fi
+done < ~/SNP_calling/data/$library/meta/samplelist.txt
+done
+```
+This is contained in ```3-1-Variant_discovery.sh```.
+
+##4. Merge gvcf files
+The last step performs the SNP Calling for each sample, after this the gvcf files are merged to get a final VCF file. 
+- Save all the gvcf in the same directory
+- I used a modified version of the Greg Owens script available at:
+https://github.com/owensgl/argentina_helianthus/blob/master/Genotype_gvcf.sh
+
+Tgis step is contained in the ``4-Merge_gvcf.sh`` file
+
+```
+combinedGVCFs='/LUSTRE/Genetica/aguerra/SNP_calling/data/gvcf'
+ls $combinedGVCFs | grep "vcf" | grep -v ".idx"   > GVCFs.samplelist.txt
+tmp=""
+while read prefix
+do
+        tmp="$tmp --variant $combinedGVCFs/$prefix"
+done < GVCFs.samplelist.txt
+
+java -Xmx50g -jar /LUSTRE/Genetica/aguerra/SNP_calling/bin/GenomeAnalysisTK.jar \
+        -nt 10 \
+        -l INFO \
+        -R /LUSTRE/Genetica/aguerra/SNP_calling/Pvulgarisv2.1/assembly/Pvulgaris_442_v2.0.fa \
+        -log /LUSTRE/Genetica/aguerra/SNP_calling/data/log/GenotypeGVCF_Phasev2.log \
+        -T GenotypeGVCFs \
+        $tmp \
+        -o /LUSTRE/Genetica/aguerra/SNP_calling/data/out/Phaseolus.v2.vcf \
+	-hets 0.01 \
+        --max_alternate_alleles 6
+```
+#####The output of this step is ready to be filter!!!
