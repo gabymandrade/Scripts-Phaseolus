@@ -6,4 +6,5 @@ tar -xjvf samtools-1.21.tar.bz2
 cd samtools-1.21
 ./configure --prefix=$SOFTWARE_DIRECTORY
 make
-make install
+
+Para correr de forma local ./samtools
