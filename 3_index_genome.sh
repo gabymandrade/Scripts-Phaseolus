@@ -11,14 +11,10 @@
 #This script construct the FM-index for the reference genome, what is necessary to run bwa 
 
 
-#Create directory for my output
-mkdir ../data/2.Ref_genonome/index_genome
-
-
 #Define variables
 ref_gen=../data/2.Ref_genonome/assembly/Pcoccineus_703_v1.0.fa	#Path from bin to my reference genome
-prefix=../data/2.Ref_genonome/index/Pcoccineus_index_unmasked  #Index database sequences in the FASTA format, importante que este descomprimido
-output=../data/2.Ref_genonome/index  #Path to my output
+prefix=../data/2.Ref_genonome/index_genome/Pcoccineus_index_unmasked  #Index database sequences in the FASTA format, importante que este descomprimido
+output=../data/2.Ref_genonome/index_genome  #Path to my output
 
 
 #Run BWA with bwtsw algoritm, bwtsw está mejor optimizado para genomas eucariotas como plantas. is: no es óptimo para genomas eucariotas
